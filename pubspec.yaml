@@ -3,7 +3,7 @@ description: "Najem Starcall Official Mobile App"
 publish_to: 'none'
 
 # Incremented version code (+2) to allow updating your live app on Google Play
-version: 1.0.1+2
+version: 2.1.5+1
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
