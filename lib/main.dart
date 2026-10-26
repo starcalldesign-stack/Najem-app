@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -56,7 +55,7 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
   // OneSignal & Link Handling Configuration
   // ---------------------------------------------------------------------------
   void _initOneSignal() {
-    // Replace with your OneSignal App ID
+    // OneSignal App ID Initialization
     OneSignal.initialize("YOUR_ONESIGNAL_APP_ID_HERE");
     OneSignal.Notifications.requestPermission(true);
 
@@ -230,7 +229,7 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
         body: SafeArea(
           child: Stack(
             children: [
-              // 1, 2 & 3. WebView with Aggressive Caching, DOM Storage & Media Playback Fixes
+              // WebView with Aggressive Caching, DOM Storage & Media Playback Fixes
               InAppWebView(
                 initialUrlRequest: URLRequest(url: WebUri(_homeUrl)),
                 initialSettings: InAppWebViewSettings(
@@ -260,7 +259,7 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
                 },
               ),
 
-              // 4. Smart Loading Feedback
+              // Smart Loading Feedback
               if (_isLoading)
                 const Positioned(
                   top: 0,
@@ -273,7 +272,7 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
                   ),
                 ),
 
-              // 5. Custom Floating Pill-Shaped Bottom Navigation Bar
+              // Custom Floating Pill-Shaped Bottom Navigation Bar
               Align(
                 alignment: Alignment.bottomCenter,
                 child: Padding(
