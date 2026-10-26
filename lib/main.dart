@@ -56,7 +56,7 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
   // ---------------------------------------------------------------------------
   void _initOneSignal() {
     // OneSignal App ID Initialization
-    OneSignal.initialize("YOUR_ONESIGNAL_APP_ID_HERE");
+    OneSignal.initialize("b8a319d1-1f12-473f-b555-cc237a551f20");
     OneSignal.Notifications.requestPermission(true);
 
     // Foreground listener: Captures alerts and stores them in local history
