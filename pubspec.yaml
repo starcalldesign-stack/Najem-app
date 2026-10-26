@@ -2,8 +2,8 @@ name: najem_app
 description: "Najem Starcall Official Mobile App"
 publish_to: 'none'
 
-# Incremented version code (+2) to allow updating your live app on Google Play
-version: 2.1.5+2
+# Incremented build version (+3) to satisfy App Store Connect / TestFlight & Google Play upload rules
+version: 2.1.5+3
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -11,10 +11,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  webview_flutter: ^4.8.0
-  webview_flutter_wkwebview: ^3.13.0
+  flutter_inappwebview: ^6.0.0
   connectivity_plus: ^6.0.0
   onesignal_flutter: ^5.7.1
+  url_launcher: ^6.3.0
   shared_preferences: ^2.2.3
   intl: ^0.19.0
   cupertino_icons: ^1.0.8
