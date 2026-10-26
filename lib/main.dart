@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 void main() {
@@ -37,8 +39,8 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
   bool _isLoading = true;
   int _currentTabIndex = 0;
 
-  // Local OneSignal Notification History Array
-  final List<Map<String, String>> _notificationHistory = [];
+  // Notification History List loaded from SharedPreferences
+  List<Map<String, String>> _notificationHistory = [];
 
   // WooCommerce Base URLs
   final String _homeUrl = "https://najemstarcall.com/";
@@ -48,34 +50,69 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
   @override
   void initState() {
     super.initState();
+    _loadNotificationHistory();
     _initOneSignal();
+  }
+
+  // ----------------F-----------------------------------------------------------
+  // Persistent Storage for Notification History
+  // ---------------------------------------------------------------------------
+  Future<void> _loadNotificationHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    final List<String>? storedHistory = prefs.getStringList('notification_history');
+    if (storedHistory != null) {
+      setState(() {
+        _notificationHistory = storedHistory
+            .map((item) => Map<String, String>.from(jsonDecode(item)))
+            .toList();
+      });
+    }
+  }
+
+  Future<void> _saveNotificationToHistory(String title, String body) async {
+    final prefs = await SharedPreferences.getInstance();
+    final newEntry = {
+      'title': title,
+      'body': body,
+      'time': DateTime.now().toString().substring(11, 16),
+    };
+
+    setState(() {
+      _notificationHistory.insert(0, newEntry);
+    });
+
+    final List<String> encodedList =
+        _notificationHistory.map((item) => jsonEncode(item)).toList();
+    await prefs.setStringList('notification_history', encodedList);
   }
 
   // ---------------------------------------------------------------------------
   // OneSignal & Link Handling Configuration
   // ---------------------------------------------------------------------------
   void _initOneSignal() {
-    // OneSignal App ID Initialization
     OneSignal.initialize("b8a319d1-1f12-473f-b555-cc237a551f20");
     OneSignal.Notifications.requestPermission(true);
 
-    // Foreground listener: Captures alerts and stores them in local history
+    // Foreground listener: Captures alerts, stores them, and displays them
     OneSignal.Notifications.addForegroundWillDisplayListener((event) {
       final notification = event.notification;
-      setState(() {
-        _notificationHistory.insert(0, {
-          'title': notification.title ?? 'Notification',
-          'body': notification.body ?? '',
-          'time': DateTime.now().toString().substring(11, 16),
-        });
-      });
+      _saveNotificationToHistory(
+        notification.title ?? 'Notification',
+        notification.body ?? '',
+      );
       event.preventDefault();
       event.notification.display();
     });
 
-    // Notification click listener: Opens links inside the WebView (not Chrome)
+    // Notification click listener: Opens links inside the WebView
     OneSignal.Notifications.addClickListener((event) {
-      final launchUrl = event.notification.launchUrl;
+      final notification = event.notification;
+      _saveNotificationToHistory(
+        notification.title ?? 'Notification',
+        notification.body ?? '',
+      );
+      
+      final launchUrl = notification.launchUrl;
       if (launchUrl != null && launchUrl.isNotEmpty) {
         _handleDeepLink(launchUrl);
       }
@@ -100,22 +137,19 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
 
     final urlString = uri.toString();
 
-    // 1. WhatsApp Scheme Interception (whatsapp://, wa.me, api.whatsapp.com)
     if (urlString.contains("whatsapp://") ||
         urlString.contains("wa.me") ||
         urlString.contains("api.whatsapp.com")) {
-      
       final Uri whatsappUri = Uri.parse(urlString);
       if (await canLaunchUrl(whatsappUri)) {
         await launchUrl(
           whatsappUri,
-          mode: LaunchMode.externalApplication, // Opens external native WhatsApp
+          mode: LaunchMode.externalApplication,
         );
       }
-      return NavigationActionPolicy.CANCEL; // Stops WebView from stalling
+      return NavigationActionPolicy.CANCEL;
     }
 
-    // 2. Intercept Tel / Mailto schemes
     if (!["http", "https"].contains(uri.scheme)) {
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -131,7 +165,6 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
   // ---------------------------------------------------------------------------
   void _onTabTapped(int index) {
     if (index == 2) {
-      // Notification History Modal
       _showNotificationHistorySheet();
       return;
     }
@@ -161,52 +194,57 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (context) {
-        return Container(
-          height: MediaQuery.of(context).size.height * 0.7,
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.7,
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    "Notification History",
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        "Notification History",
+                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
+                      )
+                    ],
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
-                  )
+                  const Divider(),
+                  Expanded(
+                    child: _notificationHistory.isEmpty
+                        .isEmpty
+                        ? const Center(
+                            child: Text("No past notifications found."),
+                          )
+                        : ListView.builder(
+                            itemCount: _notificationHistory.length,
+                            itemBuilder: (context, index) {
+                              final item = _notificationHistory[index];
+                              return Card(
+                                margin: const EdgeInsets.symmetric(vertical: 6),
+                                child: ListTile(
+                                  leading: const Icon(Icons.notifications_active, color: Colors.amber),
+                                  title: Text(item['title'] ?? ''),
+                                  subtitle: Text(item['body'] ?? ''),
+                                  trailing: Text(
+                                    item['time'] ?? '',
+                                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
                 ],
               ),
-              const Divider(),
-              Expanded(
-                child: _notificationHistory.isEmpty
-                    ? const Center(
-                        child: Text("No past notifications found."),
-                      )
-                    : ListView.builder(
-                        itemCount: _notificationHistory.length,
-                        itemBuilder: (context, index) {
-                          final item = _notificationHistory[index];
-                          return Card(
-                            margin: const EdgeInsets.symmetric(vertical: 6),
-                            child: ListTile(
-                              leading: const Icon(Icons.notifications_active, color: Colors.amber),
-                              title: Text(item['title'] ?? ''),
-                              subtitle: Text(item['body'] ?? ''),
-                              trailing: Text(
-                                item['time'] ?? '',
-                                style: const TextStyle(fontSize: 12, color: Colors.grey),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -229,20 +267,14 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
         body: SafeArea(
           child: Stack(
             children: [
-              // WebView with Aggressive Caching, DOM Storage & Media Playback Fixes
               InAppWebView(
                 initialUrlRequest: URLRequest(url: WebUri(_homeUrl)),
                 initialSettings: InAppWebViewSettings(
-                  // Caching & DOM Persistence for WooCommerce sessions/carts
                   cacheEnabled: true,
                   domStorageEnabled: true,
                   cacheMode: CacheMode.LOAD_DEFAULT,
-
-                  // Hardware Acceleration & Embedded YouTube Fixes
                   allowsInlineMediaPlayback: true,
                   mediaPlaybackRequiresUserGesture: false,
-
-                  // General Features
                   javaScriptEnabled: true,
                   supportZoom: false,
                   useShouldOverrideUrlLoading: true,
@@ -259,7 +291,6 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
                 },
               ),
 
-              // Smart Loading Feedback
               if (_isLoading)
                 const Positioned(
                   top: 0,
@@ -272,7 +303,6 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
                   ),
                 ),
 
-              // Custom Floating Pill-Shaped Bottom Navigation Bar
               Align(
                 alignment: Alignment.bottomCenter,
                 child: Padding(
