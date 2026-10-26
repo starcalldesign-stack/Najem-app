@@ -3,7 +3,7 @@ description: "Najem Starcall Official Mobile App"
 publish_to: 'none'
 
 # Incremented build version (+3) to satisfy App Store Connect / TestFlight & Google Play upload rules
-version: 2.1.5+4
+version: 2.1.5+5
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -11,6 +11,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  webview_flutter: ^4.10.0  
   flutter_inappwebview: ^6.0.0
   connectivity_plus: ^6.0.0
   onesignal_flutter: ^5.7.1

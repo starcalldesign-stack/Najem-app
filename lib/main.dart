@@ -1,356 +1,378 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_android/webview_flutter_android.dart';
-import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // OneSignal Push Notification Setup
-  OneSignal.Debug.setLogLevel(OSLogLevel.verbose);
-  OneSignal.initialize("b8a319d1-1f12-473f-b555-cc237a551f20");
-  OneSignal.Notifications.requestPermission(true);
-
-  runApp(const MyApp());
+  runApp(const NajemApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class NajemApp extends StatelessWidget {
+  const NajemApp({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      debugShowCheckedModeBanner: false,
       title: 'Najem Starcall',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        primarySwatch: Colors.blue,
-        useMaterial3: true,
+        primarySwatch: Colors.amber,
+        scaffoldBackgroundColor: Colors.white,
       ),
-      home: const MainLayoutScreen(),
+      home: const MainWebViewScreen(),
     );
   }
 }
 
-class MainLayoutScreen extends StatefulWidget {
-  const MainLayoutScreen({super.key});
+class MainWebViewScreen extends StatefulWidget {
+  const MainWebViewScreen({Key? key}) : super(key: key);
 
   @override
-  State<MainLayoutScreen> createState() => _MainLayoutScreenState();
+  State<MainWebViewScreen> createState() => _MainWebViewScreenState();
 }
 
-class _MainLayoutScreenState extends State<MainLayoutScreen> {
-  late final WebViewController webViewController;
-  double progress = 0;
-  bool isConnected = true;
-  int currentNavIndex = 0;
+class _MainWebViewScreenState extends State<MainWebViewScreen> {
+  InAppWebViewController? _webViewController;
+  bool _isLoading = true;
+  int _currentTabIndex = 0;
 
-  final String homeUrl = "https://najemstarcall.com/";
-  final String shopUrl = "https://najemstarcall.com/shop";
-  final String accountUrl = "https://najemstarcall.com/my-account";
+  // Local OneSignal Notification History Array
+  final List<Map<String, String>> _notificationHistory = [];
+
+  // WooCommerce Base URLs
+  final String _homeUrl = "https://najemstarcall.com/";
+  final String _shopUrl = "https://najemstarcall.com/shop";
+  final String _accountUrl = "https://najemstarcall.com/my-account";
 
   @override
   void initState() {
     super.initState();
-    checkConnectivity();
-    _initWebView();
+    _initOneSignal();
   }
 
-  void _initWebView() {
-    late final PlatformWebViewControllerCreationParams params;
+  // ---------------------------------------------------------------------------
+  // OneSignal & Link Handling Configuration
+  // ---------------------------------------------------------------------------
+  void _initOneSignal() {
+    // Replace with your OneSignal App ID
+    OneSignal.initialize("YOUR_ONESIGNAL_APP_ID_HERE");
+    OneSignal.Notifications.requestPermission(true);
 
-    if (WebViewPlatform.instance is WebKitWebViewPlatform) {
-      params = WebKitWebViewControllerCreationParams(
-        allowsInlineMediaPlayback: true,
-        mediaTypesRequiringUserAction: const <PlaybackMediaTypes>{},
+    // Foreground listener: Captures alerts and stores them in local history
+    OneSignal.Notifications.addForegroundWillDisplayListener((event) {
+      final notification = event.notification;
+      setState(() {
+        _notificationHistory.insert(0, {
+          'title': notification.title ?? 'Notification',
+          'body': notification.body ?? '',
+          'time': DateTime.now().toString().substring(11, 16),
+        });
+      });
+      event.preventDefault();
+      event.notification.display();
+    });
+
+    // Notification click listener: Opens links inside the WebView (not Chrome)
+    OneSignal.Notifications.addClickListener((event) {
+      final launchUrl = event.notification.launchUrl;
+      if (launchUrl != null && launchUrl.isNotEmpty) {
+        _handleDeepLink(launchUrl);
+      }
+    });
+  }
+
+  void _handleDeepLink(String url) {
+    if (_webViewController != null) {
+      _webViewController!.loadUrl(
+        urlRequest: URLRequest(url: WebUri(url)),
       );
-    } else {
-      params = const PlatformWebViewControllerCreationParams();
     }
+  }
 
-    final WebViewController controller =
-        WebViewController.fromPlatformCreationParams(params);
+  // ---------------------------------------------------------------------------
+  // Navigation & Scheme Interceptor (WhatsApp / External Links)
+  // ---------------------------------------------------------------------------
+  Future<NavigationActionPolicy> _handleNavigationOverride(
+      InAppWebViewController controller, NavigationAction navigationAction) async {
+    final uri = navigationAction.request.url;
+    if (uri == null) return NavigationActionPolicy.ALLOW;
 
-    controller
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(Colors.white)
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onNavigationRequest: (NavigationRequest request) {
-            final url = request.url;
-            if (url.contains('najemstarcall.com')) {
-              return NavigationDecision.navigate;
-            }
-            return NavigationDecision.prevent;
-          },
-          onProgress: (int prog) {
-            if (mounted) {
-              setState(() {
-                progress = prog / 100;
-              });
-            }
-          },
-        ),
-      )
-      ..loadRequest(Uri.parse(homeUrl));
+    final urlString = uri.toString();
 
-    // Platform-specific setups and proper cookie management
-    if (controller.platform is AndroidWebViewController) {
-      final AndroidWebViewController androidController =
-          controller.platform as AndroidWebViewController;
-      androidController.setGeolocationEnabled(false);
-      androidController.setMediaPlaybackRequiresUserGesture(false);
+    // 1. WhatsApp Scheme Interception (whatsapp://, wa.me, api.whatsapp.com)
+    if (urlString.contains("whatsapp://") ||
+        urlString.contains("wa.me") ||
+        urlString.contains("api.whatsapp.com")) {
       
-      AndroidWebViewCookieManager(
-        const PlatformWebViewCookieManagerCreationParams(),
-      ).setAcceptThirdPartyCookies(androidController, true);
+      final Uri whatsappUri = Uri.parse(urlString);
+      if (await canLaunchUrl(whatsappUri)) {
+        await launchUrl(
+          whatsappUri,
+          mode: LaunchMode.externalApplication, // Opens external native WhatsApp
+        );
+      }
+      return NavigationActionPolicy.CANCEL; // Stops WebView from stalling
     }
 
-    if (controller.platform is WebKitWebViewController) {
-      final iosController = controller.platform as WebKitWebViewController;
-      iosController.setAllowsBackForwardNavigationGestures(true);
+    // 2. Intercept Tel / Mailto schemes
+    if (!["http", "https"].contains(uri.scheme)) {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+      return NavigationActionPolicy.CANCEL;
     }
 
-    webViewController = controller;
+    return NavigationActionPolicy.ALLOW;
   }
 
-  Future<void> checkConnectivity() async {
-    var connectivityResult = await (Connectivity().checkConnectivity());
+  // ---------------------------------------------------------------------------
+  // Bottom Navigation Handlers
+  // ---------------------------------------------------------------------------
+  void _onTabTapped(int index) {
+    if (index == 2) {
+      // Notification History Modal
+      _showNotificationHistorySheet();
+      return;
+    }
+
     setState(() {
-      isConnected = !connectivityResult.contains(ConnectivityResult.none);
-    });
-  }
-
-  void _onNavTap(int index) async {
-    if (index == currentNavIndex) return;
-
-    setState(() {
-      currentNavIndex = index;
+      _currentTabIndex = index;
     });
 
-    if (index == 0) {
-      webViewController.loadRequest(Uri.parse(homeUrl));
-    } else if (index == 1) {
-      webViewController.loadRequest(Uri.parse(shopUrl));
-    } else if (index == 2) {
-      webViewController.loadRequest(Uri.parse(accountUrl));
+    switch (index) {
+      case 0:
+        _webViewController?.loadUrl(urlRequest: URLRequest(url: WebUri(_homeUrl)));
+        break;
+      case 1:
+        _webViewController?.loadUrl(urlRequest: URLRequest(url: WebUri(_shopUrl)));
+        break;
+      case 3:
+        _webViewController?.loadUrl(urlRequest: URLRequest(url: WebUri(_accountUrl)));
+        break;
     }
   }
 
-  Future<bool> _onWillPop() async {
-    if (await webViewController.canGoBack()) {
-      webViewController.goBack();
-      return false;
-    } else {
-      bool? exitAuthorized = await showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Exit App'),
-          content: const Text('Are you sure you want to exit the app?'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Exit', style: TextStyle(color: Colors.red)),
-            ),
-          ],
-        ),
-      );
-      return exitAuthorized ?? false;
-    }
+  void _showNotificationHistorySheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.7,
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    "Notification History",
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  )
+                ],
+              ),
+              const Divider(),
+              Expanded(
+                child: _notificationHistory.isEmpty
+                    ? const Center(
+                        child: Text("No past notifications found."),
+                      )
+                    : ListView.builder(
+                        itemCount: _notificationHistory.length,
+                        itemBuilder: (context, index) {
+                          final item = _notificationHistory[index];
+                          return Card(
+                            margin: const EdgeInsets.symmetric(vertical: 6),
+                            child: ListTile(
+                              leading: const Icon(Icons.notifications_active, color: Colors.amber),
+                              title: Text(item['title'] ?? ''),
+                              subtitle: Text(item['body'] ?? ''),
+                              trailing: Text(
+                                item['time'] ?? '',
+                                style: const TextStyle(fontSize: 12, color: Colors.grey),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
+  // ---------------------------------------------------------------------------
+  // Main UI Build
+  // ---------------------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, result) async {
-        if (didPop) return;
-        final bool shouldPop = await _onWillPop();
-        if (shouldPop) {
-          SystemNavigator.pop();
+    return WillPopScope(
+      onWillPop: () async {
+        if (_webViewController != null && await _webViewController!.canGoBack()) {
+          _webViewController!.goBack();
+          return false;
         }
+        return true;
       },
       child: Scaffold(
-        backgroundColor: Colors.white,
-        body: Stack(
-          children: [
-            SafeArea(
-              child: !isConnected
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.wifi_off, size: 80, color: Colors.grey),
-                          const SizedBox(height: 16),
-                          const Text(
-                            "No Internet Connection",
-                            style: TextStyle(
-                                fontSize: 18, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 16),
-                          ElevatedButton(
-                            onPressed: () async {
-                              await checkConnectivity();
-                              if (isConnected) {
-                                webViewController.reload();
-                              }
-                            },
-                            child: const Text("Retry"),
-                          ),
-                        ],
-                      ),
-                    )
-                  : Column(
-                      children: [
-                        if (progress < 1.0)
-                          LinearProgressIndicator(
-                            value: progress,
-                            backgroundColor: Colors.transparent,
-                            valueColor: const AlwaysStoppedAnimation<Color>(
-                                Colors.blue),
-                            minHeight: 3,
-                          ),
-                        Expanded(
-                          child: WebViewWidget(controller: webViewController),
+        body: SafeArea(
+          child: Stack(
+            children: [
+              // 1, 2 & 3. WebView with Aggressive Caching, DOM Storage & Media Playback Fixes
+              InAppWebView(
+                initialUrlRequest: URLRequest(url: WebUri(_homeUrl)),
+                initialSettings: InAppWebViewSettings(
+                  // Caching & DOM Persistence for WooCommerce sessions/carts
+                  cacheEnabled: true,
+                  domStorageEnabled: true,
+                  cacheMode: CacheMode.LOAD_DEFAULT,
+
+                  // Hardware Acceleration & Embedded YouTube Fixes
+                  allowsInlineMediaPlayback: true,
+                  mediaPlaybackRequiresUserGesture: false,
+
+                  // General Features
+                  javaScriptEnabled: true,
+                  supportZoom: false,
+                  useShouldOverrideUrlLoading: true,
+                ),
+                onWebViewCreated: (controller) {
+                  _webViewController = controller;
+                },
+                shouldOverrideUrlLoading: _handleNavigationOverride,
+                onLoadStart: (controller, url) {
+                  setState(() => _isLoading = true);
+                },
+                onLoadStop: (controller, url) {
+                  setState(() => _isLoading = false);
+                },
+              ),
+
+              // 4. Smart Loading Feedback
+              if (_isLoading)
+                const Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: LinearProgressIndicator(
+                    color: Colors.amber,
+                    backgroundColor: Colors.transparent,
+                    minHeight: 3,
+                  ),
+                ),
+
+              // 5. Custom Floating Pill-Shaped Bottom Navigation Bar
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 20, left: 16, right: 16),
+                  child: Container(
+                    height: 65,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.9),
+                      borderRadius: BorderRadius.circular(35),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.25),
+                          blurRadius: 15,
+                          offset: const Offset(0, 5),
                         ),
                       ],
                     ),
-            ),
-            Positioned(
-              left: 16,
-              right: 16,
-              bottom: 20,
-              child: FloatingGlassPillNavBar(
-                currentIndex: currentNavIndex,
-                onTap: _onNavTap,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _buildNavItem(
+                          icon: Icons.home_rounded,
+                          label: "Home",
+                          index: 0,
+                        ),
+                        _buildNavItem(
+                          icon: Icons.shopping_bag_rounded,
+                          label: "Shop",
+                          index: 1,
+                          isHighlighted: true,
+                        ),
+                        _buildNavItem(
+                          icon: Icons.notifications_rounded,
+                          label: "Alerts",
+                          index: 2,
+                        ),
+                        _buildNavItem(
+                          icon: Icons.person_rounded,
+                          label: "Account",
+                          index: 3,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
-}
 
-class FloatingGlassPillNavBar extends StatelessWidget {
-  final int currentIndex;
-  final Function(int) onTap;
+  Widget _buildNavItem({
+    required IconData icon,
+    required String label,
+    required int index,
+    bool isHighlighted = false,
+  }) {
+    final bool isSelected = _currentTabIndex == index;
 
-  const FloatingGlassPillNavBar({
-    super.key,
-    required this.currentIndex,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(35.0),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 15.0, sigmaY: 15.0),
+    if (isHighlighted) {
+      return GestureDetector(
+        onTap: () => _onTabTapped(index),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.70),
-            borderRadius: BorderRadius.circular(35.0),
-            border: Border.all(
-              color: Colors.white.withOpacity(0.15),
-              width: 1.5,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.25),
-                blurRadius: 15,
-                offset: const Offset(0, 8),
-              ),
-            ],
+          padding: const EdgeInsets.all(10),
+          decoration: const BoxDecoration(
+            color: Colors.amber,
+            shape: BoxShape.circle,
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildNavItem(0, Icons.home_rounded, "Home"),
-              _buildShopHighlightItem(1, Icons.shopping_bag_rounded, "Shop"),
-              _buildNavItem(2, Icons.person_rounded, "Account"),
-            ],
+          child: Icon(
+            icon,
+            color: Colors.black,
+            size: 26,
           ),
         ),
-      ),
-    );
-  }
+      );
+    }
 
-  Widget _buildNavItem(int index, IconData icon, String label) {
-    bool isSelected = currentIndex == index;
     return GestureDetector(
-      onTap: () => onTap(index),
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              color: isSelected ? Colors.lightBlueAccent : Colors.white70,
-              size: 24,
-            ),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              style: TextStyle(
-                color: isSelected ? Colors.lightBlueAccent : Colors.white60,
-                fontSize: 11,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildShopHighlightItem(int index, IconData icon, String label) {
-    return GestureDetector(
-      onTap: () => onTap(index),
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFF00C6FF), Color(0xFF0072FF)],
+      onTap: () => _onTabTapped(index),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            icon,
+            color: isSelected ? Colors.amber : Colors.grey,
+            size: 24,
           ),
-          borderRadius: BorderRadius.circular(25),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF0072FF).withOpacity(0.4),
-              blurRadius: 8,
-              offset: const Offset(0, 4),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: TextStyle(
+              color: isSelected ? Colors.amber : Colors.grey,
+              fontSize: 11,
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
             ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: Colors.white, size: 22),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
