@@ -3,7 +3,7 @@ description: "Najem Starcall Official Mobile App"
 publish_to: 'none'
 
 # Incremented build version (+3) to satisfy App Store Connect / TestFlight & Google Play upload rules
-version: 2.1.5+7
+version: 2.1.5+8
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
