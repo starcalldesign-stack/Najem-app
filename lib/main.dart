@@ -54,7 +54,7 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
     _initOneSignal();
   }
 
-  // ----------------F-----------------------------------------------------------
+  // ---------------------------------------------------------------------------
   // Persistent Storage for Notification History
   // ---------------------------------------------------------------------------
   Future<void> _loadNotificationHistory() async {
@@ -69,11 +69,13 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
     }
   }
 
-  Future<void> _saveNotificationToHistory(String title, String body) async {
+  Future<void> _saveNotificationToHistory(String title, String body, String imageUrl, String launchUrl) async {
     final prefs = await SharedPreferences.getInstance();
     final newEntry = {
       'title': title,
       'body': body,
+      'image': imageUrl,
+      'url': launchUrl,
       'time': DateTime.now().toString().substring(11, 16),
     };
 
@@ -96,9 +98,14 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
     // Foreground listener: Captures alerts, stores them, and displays them
     OneSignal.Notifications.addForegroundWillDisplayListener((event) {
       final notification = event.notification;
+      final imageUrl = notification.bigPicture ?? notification.launchUrl ?? '';
+      final launchUrl = notification.launchUrl ?? '';
+
       _saveNotificationToHistory(
         notification.title ?? 'Notification',
         notification.body ?? '',
+        imageUrl,
+        launchUrl,
       );
       event.preventDefault();
       event.notification.display();
@@ -107,13 +114,17 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
     // Notification click listener: Opens links inside the WebView
     OneSignal.Notifications.addClickListener((event) {
       final notification = event.notification;
+      final imageUrl = notification.bigPicture ?? '';
+      final launchUrl = notification.launchUrl ?? '';
+
       _saveNotificationToHistory(
         notification.title ?? 'Notification',
         notification.body ?? '',
+        imageUrl,
+        launchUrl,
       );
       
-      final launchUrl = notification.launchUrl;
-      if (launchUrl != null && launchUrl.isNotEmpty) {
+      if (launchUrl.isNotEmpty) {
         _handleDeepLink(launchUrl);
       }
     });
@@ -225,10 +236,28 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
                             itemCount: _notificationHistory.length,
                             itemBuilder: (context, index) {
                               final item = _notificationHistory[index];
+                              final imageUrl = item['image'] ?? '';
+                              final targetUrl = item['url'] ?? '';
+
                               return Card(
                                 margin: const EdgeInsets.symmetric(vertical: 6),
                                 child: ListTile(
-                                  leading: const Icon(Icons.notifications_active, color: Colors.amber),
+                                  onTap: () {
+                                    if (targetUrl.isNotEmpty) {
+                                      Navigator.pop(context); // Close sheet
+                                      _handleDeepLink(targetUrl); // Open in WebView
+                                    }
+                                  },
+                                  leading: imageUrl.isNotEmpty
+                                      ? Image.network(
+                                          imageUrl,
+                                          width: 50,
+                                          height: 50,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (context, error, stackTrace) =>
+                                              const Icon(Icons.notifications_active, color: Colors.amber),
+                                        )
+                                      : const Icon(Icons.notifications_active, color: Colors.amber),
                                   title: Text(item['title'] ?? ''),
                                   subtitle: Text(item['body'] ?? ''),
                                   trailing: Text(
@@ -302,6 +331,7 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
                   ),
                 ),
 
+              // Bottom Navigation Bar with #2c348f styling and responsive touch area
               Align(
                 alignment: Alignment.bottomCenter,
                 child: Padding(
@@ -309,11 +339,11 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
                   child: Container(
                     height: 65,
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.9),
+                      color: const Color(0xFF2C348F).withOpacity(0.95), // Updated Color #2c348f
                       borderRadius: BorderRadius.circular(35),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.25),
+                          color: Colors.black.withOpacity(0.3),
                           blurRadius: 15,
                           offset: const Offset(0, 5),
                         ),
@@ -364,8 +394,9 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
     final bool isSelected = _currentTabIndex == index;
 
     if (isHighlighted) {
-      return GestureDetector(
+      return InkWell(
         onTap: () => _onTabTapped(index),
+        borderRadius: BorderRadius.circular(30),
         child: Container(
           padding: const EdgeInsets.all(10),
           decoration: const BoxDecoration(
@@ -381,26 +412,30 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
       );
     }
 
-    return GestureDetector(
+    return InkWell(
       onTap: () => _onTabTapped(index),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            icon,
-            color: isSelected ? Colors.amber : Colors.grey,
-            size: 24,
-          ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            style: TextStyle(
-              color: isSelected ? Colors.amber : Colors.grey,
-              fontSize: 11,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+      borderRadius: BorderRadius.circular(20),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              color: isSelected ? Colors.amber : Colors.white70,
+              size: 24,
             ),
-          ),
-        ],
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? Colors.amber : Colors.white70,
+                fontSize: 11,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
