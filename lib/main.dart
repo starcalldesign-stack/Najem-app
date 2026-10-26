@@ -218,7 +218,6 @@ class _MainWebViewScreenState extends State<MainWebViewScreen> {
                   const Divider(),
                   Expanded(
                     child: _notificationHistory.isEmpty
-                        .isEmpty
                         ? const Center(
                             child: Text("No past notifications found."),
                           )
