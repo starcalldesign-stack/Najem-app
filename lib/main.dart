@@ -428,26 +428,55 @@ class _MainWebViewScreenState extends State<MainWebViewScreen>
 
     HapticFeedback.selectionClick();
 
+    final targetWeb = _tabToWeb[index];
+
+    // Tapping the active tab: go back to its main page if the user is deeper
+    // inside it, otherwise just scroll to the top.
     if (index == _currentTabIndex) {
-      _controllers[_currentWeb]?.scrollTo(x: 0, y: 0, animated: true);
+      _goToTabRoot(targetWeb, scrollIfAlreadyRoot: true);
       return;
     }
 
-    final leaving = _currentWeb;
-    _lastLeft[leaving] = DateTime.now();
+    _lastLeft[_currentWeb] = DateTime.now();
 
     setState(() {
       _currentTabIndex = index;
       _preloadOthers = true;
     });
 
-    final web = _currentWeb;
-    if (_loaded[web] &&
-        !_offline &&
-        DateTime.now().difference(_lastLeft[web]).inMinutes >= 10) {
-      _controllers[web]?.reload();
-      _lastLeft[web] = DateTime.now();
+    // Always open the tab's main page (Home / Shop / Account), not the last
+    // sub-page the user visited inside that tab.
+    _goToTabRoot(targetWeb);
+  }
+
+  String _normalizeUrl(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return url;
+    var path = uri.path;
+    if (path.length > 1 && path.endsWith('/')) {
+      path = path.substring(0, path.length - 1);
     }
+    return '${uri.host}$path';
+  }
+
+  Future<void> _goToTabRoot(int web,
+      {bool scrollIfAlreadyRoot = false}) async {
+    final controller = _controllers[web];
+    if (controller == null) return;
+
+    final current = await controller.getUrl();
+    final atRoot = current != null &&
+        _normalizeUrl(current.toString()) == _normalizeUrl(_urls[web]);
+
+    if (atRoot) {
+      if (scrollIfAlreadyRoot) {
+        controller.scrollTo(x: 0, y: 0, animated: true);
+      }
+      return;
+    }
+
+    _startLoading(web);
+    await controller.loadUrl(urlRequest: URLRequest(url: WebUri(_urls[web])));
   }
 
   Future<bool> _handleBack() async {
