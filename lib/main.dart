@@ -135,6 +135,39 @@ class _MainWebViewScreenState extends State<MainWebViewScreen>
     injectionTime: UserScriptInjectionTime.AT_DOCUMENT_END,
   );
 
+  // Tabs whose content is out of date because the cart changed elsewhere.
+  final List<bool> _dirty = [false, false, false];
+  String? _cartHash;
+
+  // Watches the WooCommerce cart cookies and tells Flutter when the cart
+  // changed, so the other tabs (Home header cart, etc.) can refresh.
+  final UserScript _cartScript = UserScript(
+    source: """
+      (function() {
+        if (window.__najemCartWatch) return;
+        window.__najemCartWatch = true;
+        function getCookie(n) {
+          var m = document.cookie.match('(?:^|; )' + n + '=([^;]*)');
+          return m ? m[1] : '';
+        }
+        var last = null;
+        function check() {
+          var h = getCookie('woocommerce_cart_hash') + '|' +
+                  getCookie('woocommerce_items_in_cart');
+          if (h !== last) {
+            last = h;
+            try {
+              window.flutter_inappwebview.callHandler('cartState', h);
+            } catch (e) { last = null; }
+          }
+        }
+        check();
+        setInterval(check, 1000);
+      })();
+    """,
+    injectionTime: UserScriptInjectionTime.AT_DOCUMENT_END,
+  );
+
   @override
   void initState() {
     super.initState();
@@ -468,7 +501,12 @@ class _MainWebViewScreenState extends State<MainWebViewScreen>
     final atRoot = current != null &&
         _normalizeUrl(current.toString()) == _normalizeUrl(_urls[web]);
 
-    if (atRoot) {
+    // Cart changed in another tab: reload even if already on the main page
+    // so the cart count / mini-cart shows the real items.
+    final stale = _dirty[web];
+    _dirty[web] = false;
+
+    if (atRoot && !stale) {
       if (scrollIfAlreadyRoot) {
         controller.scrollTo(x: 0, y: 0, animated: true);
       }
@@ -593,7 +631,8 @@ class _MainWebViewScreenState extends State<MainWebViewScreen>
   Widget _buildWebView(int web) {
     return InAppWebView(
       initialUrlRequest: URLRequest(url: WebUri(_urls[web])),
-      initialUserScripts: UnmodifiableListView<UserScript>([_appStyleScript]),
+      initialUserScripts:
+          UnmodifiableListView<UserScript>([_appStyleScript, _cartScript]),
       pullToRefreshController: _refreshControllers[web],
       initialSettings: InAppWebViewSettings(
         // Speed
@@ -627,6 +666,21 @@ class _MainWebViewScreenState extends State<MainWebViewScreen>
       ),
       onWebViewCreated: (controller) {
         _controllers[web] = controller;
+
+        controller.addJavaScriptHandler(
+          handlerName: 'cartState',
+          callback: (args) {
+            final hash = args.isNotEmpty ? args[0].toString() : '';
+            if (_cartHash != null && hash != _cartHash) {
+              // Cart changed: every OTHER tab is now showing stale data
+              for (int i = 0; i < 3; i++) {
+                if (i != web) _dirty[i] = true;
+              }
+            }
+            _cartHash = hash;
+          },
+        );
+
         final pending = _pendingDeepLink;
         if (pending != null) {
           _pendingDeepLink = null;
